@@ -35,8 +35,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from compressai.ans import BufferedRansEncoder, RansDecoder
-from compressai.entropy_models import EntropyBottleneck, GaussianConditional
-from compressai.layers import GDN, MaskedConv2d
+from CompressAImaster.compressai.entropy_models import EntropyBottleneck, GaussianConditional
+from CompressAImaster.compressai.layers import GDN, MaskedConv2d
 
 from .utils import conv, deconv, update_registered_buffers
 
@@ -142,6 +142,7 @@ class FactorizedPrior(CompressionModel):
         )
 
         self.g_s = nn.Sequential(
+            
             deconv(M, N),
             GDN(N, inverse=True),
             deconv(N, N),
@@ -217,7 +218,7 @@ class ScaleHyperprior(CompressionModel):
         super().__init__(entropy_bottleneck_channels=N, **kwargs)
 
         self.g_a = nn.Sequential(
-            conv(4, N),
+            conv(3, N),
             GDN(N),
             conv(N, N),
             GDN(N),
@@ -227,7 +228,7 @@ class ScaleHyperprior(CompressionModel):
         )
 
         self.g_s = nn.Sequential(
-            deconv(M, N),
+            deconv(M+1, N),
             GDN(N, inverse=True),
             deconv(N, N),
             GDN(N, inverse=True),
@@ -261,13 +262,28 @@ class ScaleHyperprior(CompressionModel):
     def downsampling_factor(self) -> int:
         return 2 ** (4 + 2)
 
-    def forward(self, x):
+    def forward(self, x, var):
+        # print("forward'da varyans basiliyoor:", var)
+       
         y = self.g_a(x)
         z = self.h_a(torch.abs(y))
         z_hat, z_likelihoods = self.entropy_bottleneck(z)
         scales_hat = self.h_s(z_hat)
-        y_hat, y_likelihoods = self.gaussian_conditional(y, scales_hat)
-        x_hat = self.g_s(y_hat)
+        y_hat, y_likelihoods = self.gaussian_conditional(y, scales_hat)   
+        # y_hat.to("cuda:0")
+        var = (var/(255**2)).to("cuda:0")
+        
+        matris = torch.ones(1,1,y_hat.size()[2],y_hat.size()[3]).to("cuda:0")
+        add = torch.zeros(y_hat.size()[0], 1, y_hat.size()[2], y_hat.size()[3]) # .to("cuda:0")
+        for i in range((len(var))):
+            add[i,:,:,:] = (var[i]*matris)
+            
+        # add = (var*torch.ones(y_hat.size()[0],1,y_hat.size()[2],y_hat.size()[3])).to("cuda")
+       
+        #y_hat_added = torch.cat((y_hat, add), 1) # .to("cuda:0")
+        y_hat.to("cuda:0")
+        add.to("cuda:0")
+        x_hat = self.g_s(torch.cat((y_hat.to("cuda"), add.to("cuda")), 1))
 
         return {
             "x_hat": x_hat,
@@ -302,7 +318,7 @@ class ScaleHyperprior(CompressionModel):
     def compress(self, x):
         y = self.g_a(x)
         z = self.h_a(torch.abs(y))
-
+    
         z_strings = self.entropy_bottleneck.compress(z)
         z_hat = self.entropy_bottleneck.decompress(z_strings, z.size()[-2:])
 
@@ -408,7 +424,7 @@ class JointAutoregressiveHierarchicalPriors(MeanScaleHyperprior):
         super().__init__(N=N, M=M, **kwargs)
 
         self.g_a = nn.Sequential(
-            conv(4, N, kernel_size=5, stride=2),
+            conv(3, N, kernel_size=5, stride=2),
             GDN(N),
             conv(N, N, kernel_size=5, stride=2),
             GDN(N),
@@ -579,7 +595,7 @@ class JointAutoregressiveHierarchicalPriors(MeanScaleHyperprior):
     def decompress(self, strings, shape):
         assert isinstance(strings, list) and len(strings) == 2
 
-        if next(self.parameters()).device != torch.device("cpu"):
+        if next(self.parameters()).device != torch.device("cuda:0"):
             warnings.warn(
                 "Inference on GPU is not recommended for the autoregressive "
                 "models (the entropy coder is run sequentially on CPU)."
