@@ -35,8 +35,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from compressai.ans import BufferedRansEncoder, RansDecoder
-from CompressAImaster.compressai.entropy_models import EntropyBottleneck, GaussianConditional
-from CompressAImaster.compressai.layers import GDN, MaskedConv2d
+from compressai.entropy_models import EntropyBottleneck, GaussianConditional
+from compressai.layers import GDN, MaskedConv2d
 
 from .utils import conv, deconv, update_registered_buffers
 
